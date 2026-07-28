@@ -1,0 +1,273 @@
+#!/bin/sh
+
+#################################################################################
+#
+#   Lynis
+# ------------------
+#
+# Copyright (c) Michael Boelen, CISOfy, and many contributors.
+#
+# Website  : https://cisofy.com
+# Blog     : https://linux-audit.com/
+# GitHub   : https://github.com/CISOfy/lynis
+#
+# Lynis comes with ABSOLUTELY NO WARRANTY. This is free software, and you are
+# welcome to redistribute it under the terms of the GNU General Public License.
+# See LICENSE file for usage of this software.
+#
+#################################################################################
+#
+# Incus Container & VM Security
+#
+#################################################################################
+#
+    InsertSection "Incus Container & VM Security"
+#
+#################################################################################
+#
+
+    INCUSD_BINARY=""
+    INCUS_BINARY=""
+
+    for INCUSD_PATH in /usr/bin/incusd /usr/lib/incus/incusd /usr/sbin/incusd /usr/local/bin/incusd; do
+        if [ -x "${INCUSD_PATH}" ]; then
+            INCUSD_BINARY="${INCUSD_PATH}"
+            break
+        fi
+    done
+    if [ -z "${INCUSD_BINARY}" ] && command -v incusd >/dev/null 2>&1; then
+        INCUSD_BINARY=$(command -v incusd)
+    fi
+
+    if [ -x /usr/bin/incus ]; then
+        INCUS_BINARY="/usr/bin/incus"
+    elif command -v incus >/dev/null 2>&1; then
+        INCUS_BINARY=$(command -v incus)
+    fi
+
+    STAT_AVAILABLE=0
+    if [ -n "${STATBINARY}" ]; then
+        STAT_AVAILABLE=1
+    fi
+
+#
+#################################################################################
+#
+    # Test        : CUST-8600
+    # Description : Check if Incus (incusd/incus) binary is installed
+    Register --test-no CUST-8600 --os Linux --weight L --network NO --category security --description "Check Incus binary presence"
+    if [ ${SKIPTEST} -eq 0 ]; then
+        LogText "Test: checking if incusd or incus binary is installed"
+        if [ -n "${INCUSD_BINARY}" ]; then
+            INCUSD_VER=$(${INCUSD_BINARY} --version 2>/dev/null | head -1)
+            Display --indent 2 --text "- Incus daemon found" --result "${STATUS_OK}" --color GREEN
+            LogText "Result: incusd binary found at ${INCUSD_BINARY} (${INCUSD_VER})"
+        else
+            Display --indent 2 --text "- Incus daemon found" --result "${STATUS_NOT_FOUND}" --color WHITE
+            LogText "Result: incusd binary is not installed on this system"
+        fi
+        if [ -n "${INCUS_BINARY}" ]; then
+            INCUS_VER=$(${INCUS_BINARY} --version 2>/dev/null | head -1)
+            Display --indent 2 --text "- Incus client found" --result "${STATUS_OK}" --color GREEN
+            LogText "Result: incus binary found at ${INCUS_BINARY} (${INCUS_VER})"
+        else
+            Display --indent 2 --text "- Incus client found" --result "${STATUS_NOT_FOUND}" --color WHITE
+        fi
+    fi
+#
+#################################################################################
+#
+    # Test        : CUST-8602
+    # Description : Check Incus data directory permissions
+    if [ -z "${INCUSD_BINARY}" ]; then
+        PREQS_MET="NO"
+        SKIPREASON="incusd binary not found"
+    elif [ ${STAT_AVAILABLE} -eq 0 ]; then
+        PREQS_MET="NO"
+        SKIPREASON="stat binary not found"
+    else
+        PREQS_MET="YES"
+    fi
+    Register --test-no CUST-8602 --preqs-met ${PREQS_MET} --skip-reason "${SKIPREASON}" --os Linux --weight H --network NO --category security --description "Check Incus data directory permissions"
+    if [ ${SKIPTEST} -eq 0 ]; then
+        FOUNDPROBLEM=0
+        INCUS_DIR="${ROOTDIR}var/lib/incus"
+        LogText "Test: checking ${INCUS_DIR} directory"
+        if [ -d "${INCUS_DIR}" ]; then
+            DIR_PERMS=$(${STATBINARY} -c "%a" "${INCUS_DIR}" 2>/dev/null)
+            DIR_OWNER=$(${STATBINARY} -c "%U:%G" "${INCUS_DIR}" 2>/dev/null)
+            LogText "Result: ${INCUS_DIR} exists with permissions ${DIR_PERMS}, owner ${DIR_OWNER}"
+            if [ "${DIR_PERMS}" = "700" ] || [ "${DIR_PERMS}" = "750" ] || [ "${DIR_PERMS}" = "710" ]; then
+                Display --indent 2 --text "- ${INCUS_DIR} (${DIR_PERMS} ${DIR_OWNER})" --result "${STATUS_OK}" --color GREEN
+            else
+                FOUNDPROBLEM=1
+                Display --indent 2 --text "- ${INCUS_DIR} (${DIR_PERMS} ${DIR_OWNER})" --result "${STATUS_WARNING}" --color RED
+                ReportWarning "${TEST_NO}" "Incus data directory permissions should be 700 (current: ${DIR_PERMS})" "${INCUS_DIR}" "text:Run chmod 700 ${INCUS_DIR}"
+            fi
+            if [ "${DIR_OWNER}" != "root:root" ]; then
+                FOUNDPROBLEM=1
+                ReportWarning "${TEST_NO}" "Incus data directory owner should be root:root (current: ${DIR_OWNER})" "${INCUS_DIR}" "text:Run chown root:root ${INCUS_DIR}"
+            fi
+        else
+            Display --indent 2 --text "- ${INCUS_DIR}" --result "${STATUS_NOT_FOUND}" --color WHITE
+            LogText "Result: Incus data directory ${INCUS_DIR} does not exist"
+        fi
+    fi
+#
+#################################################################################
+#
+    # Test        : CUST-8604
+    # Description : Check Incus configuration file and server key permissions
+    if [ -z "${INCUSD_BINARY}" ]; then
+        PREQS_MET="NO"
+        SKIPREASON="incusd binary not found"
+    elif [ ${STAT_AVAILABLE} -eq 0 ]; then
+        PREQS_MET="NO"
+        SKIPREASON="stat binary not found"
+    else
+        PREQS_MET="YES"
+    fi
+    Register --test-no CUST-8604 --preqs-met ${PREQS_MET} --skip-reason "${SKIPREASON}" --os Linux --weight H --network NO --category security --description "Check Incus server key and certificate permissions"
+    if [ ${SKIPTEST} -eq 0 ]; then
+        FOUNDPROBLEM=0
+        INCUS_ETC_DIR="${ROOTDIR}etc/incus"
+
+        if [ -d "${INCUS_ETC_DIR}" ]; then
+            LogText "Test: checking ${INCUS_ETC_DIR} configuration files"
+            for KEY_PAIR in "server.key:600 400" "server.crt:644 640 600"; do
+                KEY_FILE=$(echo "${KEY_PAIR}" | cut -d: -f1)
+                ACCEPTABLE_PERMS=$(echo "${KEY_PAIR}" | cut -d: -f2)
+                FULL_PATH="${INCUS_ETC_DIR}/${KEY_FILE}"
+
+                if [ -f "${FULL_PATH}" ]; then
+                    PERMS=$(${STATBINARY} -c "%a" "${FULL_PATH}" 2>/dev/null)
+                    OWNER=$(${STATBINARY} -c "%U:%G" "${FULL_PATH}" 2>/dev/null)
+                    LogText "Result: ${FULL_PATH} (${PERMS} ${OWNER})"
+
+                    PERM_OK=0
+                    for PERM in ${ACCEPTABLE_PERMS}; do
+                        if [ "${PERMS}" = "${PERM}" ]; then
+                            PERM_OK=1
+                            break
+                        fi
+                    done
+
+                    if [ ${PERM_OK} -eq 1 ]; then
+                        Display --indent 2 --text "- ${KEY_FILE} (${PERMS} ${OWNER})" --result "${STATUS_OK}" --color GREEN
+                    else
+                        FOUNDPROBLEM=1
+                        Display --indent 2 --text "- ${KEY_FILE} (${PERMS} ${OWNER})" --result "${STATUS_WARNING}" --color RED
+                        ReportWarning "${TEST_NO}" "Incus ${KEY_FILE} has weak permissions: ${PERMS}" "${FULL_PATH}" "text:Run chmod ${ACCEPTABLE_PERMS} ${FULL_PATH}"
+                    fi
+
+                    if [ "${OWNER}" != "root:root" ]; then
+                        FOUNDPROBLEM=1
+                        ReportWarning "${TEST_NO}" "Incus ${KEY_FILE} owner should be root:root (current: ${OWNER})" "${FULL_PATH}" "text:Run chown root:root ${FULL_PATH}"
+                    fi
+                else
+                    LogText "Result: ${FULL_PATH} not found"
+                fi
+            done
+        else
+            LogText "Result: ${INCUS_ETC_DIR} does not exist (config may be stored in /var/lib/incus)"
+            Display --indent 2 --text "- ${INCUS_ETC_DIR}" --result "${STATUS_NOT_FOUND}" --color WHITE
+        fi
+    fi
+#
+#################################################################################
+#
+    # Test        : CUST-8606
+    # Description : Check for Incus privileged instances
+    if [ -z "${INCUS_BINARY}" ]; then
+        PREQS_MET="NO"
+        SKIPREASON="incus client binary not found"
+    else
+        PREQS_MET="YES"
+    fi
+    Register --test-no CUST-8606 --preqs-met ${PREQS_MET} --skip-reason "${SKIPREASON}" --os Linux --weight H --network NO --category security --description "Check Incus privileged instances"
+    if [ ${SKIPTEST} -eq 0 ]; then
+        FOUNDPROBLEM=0
+        LogText "Test: listing Incus instances and checking for privileged mode"
+
+        # Test daemon connectivity first — incus client prints usage to stdout when daemon is unreachable
+        if ! ${INCUS_BINARY} info >/dev/null 2>&1; then
+            LogText "Result: cannot connect to Incus daemon (daemon may be stopped)"
+            Display --indent 2 --text "- Incus daemon reachable" --result "${STATUS_NOT_RUNNING}" --color YELLOW
+            Display --indent 2 --text "- Privileged instances" --result "${STATUS_NOT_FOUND}" --color WHITE
+        else
+            INCUS_LIST=$(${INCUS_BINARY} list --format json 2>/dev/null)
+            if echo "${INCUS_LIST}" | grep -q '^\s*\['; then
+                TOTAL_INSTANCES=$(echo "${INCUS_LIST}" | grep -c '"name"' 2>/dev/null)
+                LogText "Result: found ${TOTAL_INSTANCES} Incus instances"
+
+                PRIVILEGED_INSTANCES=$(echo "${INCUS_LIST}" | grep -c '"security.privileged":"true"' 2>/dev/null)
+                if [ -n "${PRIVILEGED_INSTANCES}" ] && [ "${PRIVILEGED_INSTANCES}" -gt 0 ]; then
+                    FOUNDPROBLEM=1
+                    Display --indent 2 --text "- Privileged instances (${PRIVILEGED_INSTANCES})" --result "${STATUS_WARNING}" --color RED
+                    ReportWarning "${TEST_NO}" "${PRIVILEGED_INSTANCES} Incus instance(s) are running in privileged mode (security.privileged=true)" "" "text:Review and migrate to unprivileged instances: incus config set <instance> security.privileged=false"
+                else
+                    Display --indent 2 --text "- Privileged instances" --result "${STATUS_OK}" --color GREEN
+                    LogText "Result: no privileged instances detected"
+                fi
+
+                Display --indent 2 --text "- Total Incus instances (${TOTAL_INSTANCES})" --result "${STATUS_OK}" --color GREEN
+            else
+                LogText "Result: could not parse JSON output from incus list"
+                Display --indent 2 --text "- Privileged instances" --result "${STATUS_NOT_FOUND}" --color WHITE
+            fi
+        fi
+    fi
+#
+#################################################################################
+#
+    # Test        : CUST-8608
+    # Description : Check Incus daemon status and socket permissions
+    if [ -z "${INCUSD_BINARY}" ]; then
+        PREQS_MET="NO"
+        SKIPREASON="incusd binary not found"
+    else
+        PREQS_MET="YES"
+    fi
+    Register --test-no CUST-8608 --preqs-met ${PREQS_MET} --skip-reason "${SKIPREASON}" --os Linux --weight M --network NO --category security --description "Check Incus daemon status and socket"
+    if [ ${SKIPTEST} -eq 0 ]; then
+        FOUNDPROBLEM=0
+        LogText "Test: checking if incusd daemon is running"
+
+        if IsRunning "incusd"; then
+            Display --indent 2 --text "- Incus daemon status" --result "${STATUS_RUNNING}" --color GREEN
+            LogText "Result: incusd daemon is running"
+        else
+            Display --indent 2 --text "- Incus daemon status" --result "${STATUS_NOT_RUNNING}" --color YELLOW
+            LogText "Result: incusd daemon is not running"
+        fi
+
+        INCUS_SOCKET="${ROOTDIR}var/lib/incus/unix.socket"
+        if [ -S "${INCUS_SOCKET}" ] && [ ${STAT_AVAILABLE} -eq 1 ]; then
+            SOCK_PERMS=$(${STATBINARY} -c "%a" "${INCUS_SOCKET}" 2>/dev/null)
+            SOCK_OWNER=$(${STATBINARY} -c "%U:%G" "${INCUS_SOCKET}" 2>/dev/null)
+            LogText "Result: Incus socket found (${SOCK_PERMS} ${SOCK_OWNER})"
+
+            if [ "${SOCK_PERMS}" = "660" ] || [ "${SOCK_PERMS}" = "600" ]; then
+                Display --indent 2 --text "- Incus socket (${SOCK_PERMS} ${SOCK_OWNER})" --result "${STATUS_OK}" --color GREEN
+            else
+                FOUNDPROBLEM=1
+                Display --indent 2 --text "- Incus socket (${SOCK_PERMS} ${SOCK_OWNER})" --result "${STATUS_WARNING}" --color YELLOW
+                ReportSuggestion "${TEST_NO}" "Incus socket has broad permissions (${SOCK_PERMS}); consider 660 or 600" "${INCUS_SOCKET}" "text:Restrict socket permissions and use incus group for access control"
+            fi
+        elif [ -S "${INCUS_SOCKET}" ]; then
+            LogText "Result: Incus socket exists but stat binary not available to check permissions"
+            Display --indent 2 --text "- Incus socket" --result "${STATUS_FOUND}" --color GREEN
+        else
+            LogText "Result: Incus socket ${INCUS_SOCKET} not found"
+            Display --indent 2 --text "- Incus socket" --result "${STATUS_NOT_FOUND}" --color WHITE
+        fi
+    fi
+#
+#################################################################################
+#
+
+WaitForKeyPress
+
+#
+#================================================================================
+# Lynis - Security Auditing and System Hardening for Linux and UNIX - https://cisofy.com

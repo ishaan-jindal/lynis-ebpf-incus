@@ -1,0 +1,176 @@
+#!/bin/sh
+
+#################################################################################
+#
+#   Lynis
+# ------------------
+#
+# Copyright (c) Michael Boelen, CISOfy, and many contributors.
+#
+# Website  : https://cisofy.com
+# Blog     : https://linux-audit.com/
+# GitHub   : https://github.com/CISOfy/lynis
+#
+# Lynis comes with ABSOLUTELY NO WARRANTY. This is free software, and you are
+# welcome to redistribute it under the terms of the GNU General Public License.
+# See LICENSE file for usage of this software.
+#
+#################################################################################
+#
+# eBPF Kernel Security
+#
+#################################################################################
+#
+    InsertSection "eBPF Kernel Security"
+#
+#################################################################################
+#
+
+    SYSCTL_KEYS_EXIST=0
+
+    # Test        : CUST-8500
+    # Description : Check if unprivileged eBPF is disabled
+    if [ "${SYSCTL_READKEY}" = "" ]; then PREQS_MET="NO"; SKIPREASON="sysctl binary not available"; else PREQS_MET="YES"; fi
+    Register --test-no CUST-8500 --preqs-met ${PREQS_MET} --skip-reason "${SKIPREASON}" --os Linux --weight H --network NO --category security --description "Check unprivileged eBPF is disabled"
+    if [ ${SKIPTEST} -eq 0 ]; then
+        FIND=$(${SYSCTL_READKEY} kernel.unprivileged_bpf_disabled 2>/dev/null)
+        LogText "Test: checking sysctl kernel.unprivileged_bpf_disabled"
+        if [ -z "${FIND}" ]; then
+            Display --indent 2 --text "- kernel.unprivileged_bpf_disabled" --result "${STATUS_NOT_FOUND}" --color YELLOW
+            LogText "Result: sysctl key kernel.unprivileged_bpf_disabled does not exist on this system"
+        elif [ "${FIND}" = "1" ] || [ "${FIND}" = "2" ]; then
+            Display --indent 2 --text "- kernel.unprivileged_bpf_disabled (${FIND})" --result "${STATUS_OK}" --color GREEN
+            LogText "Result: kernel.unprivileged_bpf_disabled = ${FIND} (disabled)"
+            SYSCTL_KEYS_EXIST=$((SYSCTL_KEYS_EXIST + 1))
+        else
+            Display --indent 2 --text "- kernel.unprivileged_bpf_disabled (${FIND})" --result "${STATUS_WARNING}" --color RED
+            LogText "Result: kernel.unprivileged_bpf_disabled = ${FIND} (unprivileged eBPF is enabled)"
+            ReportWarning "${TEST_NO}" "Unprivileged eBPF is enabled (kernel.unprivileged_bpf_disabled = ${FIND})" "sysctl:kernel.unprivileged_bpf_disabled=1" "text:Set kernel.unprivileged_bpf_disabled = 1 in /etc/sysctl.d/99-ebpf.conf"
+        fi
+    fi
+#
+#################################################################################
+#
+    # Test        : CUST-8502
+    # Description : Check BPF JIT hardening
+    if [ "${SYSCTL_READKEY}" = "" ]; then PREQS_MET="NO"; SKIPREASON="sysctl binary not available"; else PREQS_MET="YES"; fi
+    Register --test-no CUST-8502 --preqs-met ${PREQS_MET} --skip-reason "${SKIPREASON}" --os Linux --weight M --network NO --category security --description "Check BPF JIT hardening level"
+    if [ ${SKIPTEST} -eq 0 ]; then
+        FIND=$(${SYSCTL_READKEY} net.core.bpf_jit_harden 2>/dev/null)
+        LogText "Test: checking sysctl net.core.bpf_jit_harden"
+        if [ -z "${FIND}" ]; then
+            Display --indent 2 --text "- net.core.bpf_jit_harden" --result "${STATUS_NOT_FOUND}" --color YELLOW
+            LogText "Result: sysctl key net.core.bpf_jit_harden does not exist on this system"
+        elif [ "${FIND}" = "2" ]; then
+            Display --indent 2 --text "- net.core.bpf_jit_harden (${FIND})" --result "${STATUS_OK}" --color GREEN
+            LogText "Result: net.core.bpf_jit_harden = ${FIND} (JIT hardened with constant blinding)"
+            SYSCTL_KEYS_EXIST=$((SYSCTL_KEYS_EXIST + 1))
+        elif [ "${FIND}" = "1" ]; then
+            Display --indent 2 --text "- net.core.bpf_jit_harden (${FIND})" --result "${STATUS_WARNING}" --color YELLOW
+            LogText "Result: net.core.bpf_jit_harden = ${FIND} (JIT hardened, but no constant blinding)"
+            ReportSuggestion "${TEST_NO}" "BPF JIT hardening could be increased to level 2 (constant blinding)" "sysctl:net.core.bpf_jit_harden=2"
+        else
+            Display --indent 2 --text "- net.core.bpf_jit_harden (${FIND})" --result "${STATUS_WARNING}" --color RED
+            LogText "Result: net.core.bpf_jit_harden = ${FIND} (BPF JIT hardening is disabled)"
+            ReportWarning "${TEST_NO}" "BPF JIT hardening is disabled (net.core.bpf_jit_harden = ${FIND})" "sysctl:net.core.bpf_jit_harden=2" "text:Set net.core.bpf_jit_harden = 2 in /etc/sysctl.d/99-ebpf.conf"
+        fi
+    fi
+#
+#################################################################################
+#
+    # Test        : CUST-8504
+    # Description : Check kernel pointer restriction
+    if [ "${SYSCTL_READKEY}" = "" ]; then PREQS_MET="NO"; SKIPREASON="sysctl binary not available"; else PREQS_MET="YES"; fi
+    Register --test-no CUST-8504 --preqs-met ${PREQS_MET} --skip-reason "${SKIPREASON}" --os Linux --weight M --network NO --category security --description "Check kernel pointer restriction level"
+    if [ ${SKIPTEST} -eq 0 ]; then
+        FIND=$(${SYSCTL_READKEY} kernel.kptr_restrict 2>/dev/null)
+        LogText "Test: checking sysctl kernel.kptr_restrict"
+        if [ -z "${FIND}" ]; then
+            Display --indent 2 --text "- kernel.kptr_restrict" --result "${STATUS_NOT_FOUND}" --color YELLOW
+            LogText "Result: sysctl key kernel.kptr_restrict does not exist on this system"
+        elif [ "${FIND}" = "2" ]; then
+            Display --indent 2 --text "- kernel.kptr_restrict (${FIND})" --result "${STATUS_OK}" --color GREEN
+            LogText "Result: kernel.kptr_restrict = ${FIND} (kernel pointers hidden from all users)"
+            SYSCTL_KEYS_EXIST=$((SYSCTL_KEYS_EXIST + 1))
+        elif [ "${FIND}" = "1" ]; then
+            Display --indent 2 --text "- kernel.kptr_restrict (${FIND})" --result "${STATUS_WARNING}" --color YELLOW
+            LogText "Result: kernel.kptr_restrict = ${FIND} (kernel pointers restricted to privileged users)"
+            ReportSuggestion "${TEST_NO}" "Increase kernel pointer restriction to level 2" "sysctl:kernel.kptr_restrict=2"
+        else
+            Display --indent 2 --text "- kernel.kptr_restrict (${FIND})" --result "${STATUS_WARNING}" --color RED
+            LogText "Result: kernel.kptr_restrict = ${FIND} (kernel pointers exposed)"
+            ReportWarning "${TEST_NO}" "Kernel pointer restriction is disabled (kernel.kptr_restrict = ${FIND})" "sysctl:kernel.kptr_restrict=2" "text:Set kernel.kptr_restrict = 2 in /etc/sysctl.d/99-ebpf.conf"
+        fi
+    fi
+#
+#################################################################################
+#
+    # Test        : CUST-8506
+    # Description : Check perf event access restriction
+    if [ "${SYSCTL_READKEY}" = "" ]; then PREQS_MET="NO"; SKIPREASON="sysctl binary not available"; else PREQS_MET="YES"; fi
+    Register --test-no CUST-8506 --preqs-met ${PREQS_MET} --skip-reason "${SKIPREASON}" --os Linux --weight M --network NO --category security --description "Check perf event access restriction"
+    if [ ${SKIPTEST} -eq 0 ]; then
+        FIND=$(${SYSCTL_READKEY} kernel.perf_event_paranoid 2>/dev/null)
+        LogText "Test: checking sysctl kernel.perf_event_paranoid"
+        if [ -z "${FIND}" ]; then
+            Display --indent 2 --text "- kernel.perf_event_paranoid" --result "${STATUS_NOT_FOUND}" --color YELLOW
+            LogText "Result: sysctl key kernel.perf_event_paranoid does not exist on this system"
+        elif [ "${FIND}" -ge 3 ] 2>/dev/null; then
+            Display --indent 2 --text "- kernel.perf_event_paranoid (${FIND})" --result "${STATUS_OK}" --color GREEN
+            LogText "Result: kernel.perf_event_paranoid = ${FIND} (perf events restricted to root only)"
+            SYSCTL_KEYS_EXIST=$((SYSCTL_KEYS_EXIST + 1))
+        elif [ "${FIND}" = "2" ]; then
+            Display --indent 2 --text "- kernel.perf_event_paranoid (${FIND})" --result "${STATUS_WARNING}" --color YELLOW
+            LogText "Result: kernel.perf_event_paranoid = ${FIND} (perf events available to privileged users only)"
+            ReportSuggestion "${TEST_NO}" "Restrict perf events further (kernel.perf_event_paranoid = 3)" "sysctl:kernel.perf_event_paranoid=3"
+        else
+            Display --indent 2 --text "- kernel.perf_event_paranoid (${FIND})" --result "${STATUS_WARNING}" --color RED
+            LogText "Result: kernel.perf_event_paranoid = ${FIND} (perf events available unprivileged)"
+            ReportWarning "${TEST_NO}" "Perf events are accessible by unprivileged users (kernel.perf_event_paranoid = ${FIND})" "sysctl:kernel.perf_event_paranoid=3" "text:Set kernel.perf_event_paranoid = 3 in /etc/sysctl.d/99-ebpf.conf"
+        fi
+    fi
+#
+#################################################################################
+#
+    # Test        : CUST-8508
+    # Description : Check kernel log access restriction
+    if [ "${SYSCTL_READKEY}" = "" ]; then PREQS_MET="NO"; SKIPREASON="sysctl binary not available"; else PREQS_MET="YES"; fi
+    Register --test-no CUST-8508 --preqs-met ${PREQS_MET} --skip-reason "${SKIPREASON}" --os Linux --weight M --network NO --category security --description "Check kernel log restriction"
+    if [ ${SKIPTEST} -eq 0 ]; then
+        FIND=$(${SYSCTL_READKEY} kernel.dmesg_restrict 2>/dev/null)
+        LogText "Test: checking sysctl kernel.dmesg_restrict"
+        if [ -z "${FIND}" ]; then
+            Display --indent 2 --text "- kernel.dmesg_restrict" --result "${STATUS_NOT_FOUND}" --color YELLOW
+            LogText "Result: sysctl key kernel.dmesg_restrict does not exist on this system"
+        elif [ "${FIND}" = "1" ]; then
+            Display --indent 2 --text "- kernel.dmesg_restrict (${FIND})" --result "${STATUS_OK}" --color GREEN
+            LogText "Result: kernel.dmesg_restrict = ${FIND} (kernel log restricted to privileged users)"
+            SYSCTL_KEYS_EXIST=$((SYSCTL_KEYS_EXIST + 1))
+        else
+            Display --indent 2 --text "- kernel.dmesg_restrict (${FIND})" --result "${STATUS_WARNING}" --color RED
+            LogText "Result: kernel.dmesg_restrict = ${FIND} (kernel log accessible by all users)"
+            ReportWarning "${TEST_NO}" "Kernel log is not restricted (kernel.dmesg_restrict = ${FIND})" "sysctl:kernel.dmesg_restrict=1" "text:Set kernel.dmesg_restrict = 1 in /etc/sysctl.d/99-ebpf.conf"
+        fi
+    fi
+#
+#################################################################################
+#
+    # Summary for eBPF section
+    if [ ${SYSCTL_KEYS_EXIST} -gt 0 ] && [ ${SYSCTL_KEYS_EXIST} -lt 5 ]; then
+        Display --indent 2 --text "- eBPF hardening keys present (${SYSCTL_KEYS_EXIST}/5)" --result "${STATUS_SUGGESTION}" --color YELLOW
+        LogText "Result: ${SYSCTL_KEYS_EXIST} of 5 eBPF-related sysctl keys found; review warnings above"
+        if [ -z "${SYSCTL_READKEY}" ]; then
+            ReportSuggestion "CUST-8500" "Install procps or procps-ng package to enable sysctl queries for eBPF hardening checks"
+        fi
+    elif [ ${SYSCTL_KEYS_EXIST} -eq 0 ]; then
+        LogText "Result: no eBPF-related sysctl keys found; this kernel likely predates eBPF hardening features"
+    fi
+#
+#################################################################################
+#
+
+WaitForKeyPress
+
+#
+#================================================================================
+# Lynis - Security Auditing and System Hardening for Linux and UNIX - https://cisofy.com
